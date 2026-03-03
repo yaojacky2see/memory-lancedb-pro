@@ -32,7 +32,7 @@ import { createTierManager, DEFAULT_TIER_CONFIG } from "./src/tier-manager.js";
 interface PluginConfig {
   embedding: {
     provider: "openai-compatible";
-    apiKey: string;
+    apiKey: string | string[];
     model?: string;
     baseURL?: string;
     dimensions?: number;
@@ -359,10 +359,19 @@ const memoryLanceDBProPlugin = {
       taskPassage: config.embedding.taskPassage,
       normalized: config.embedding.normalized,
     });
-    const retriever = createRetriever(store, embedder, {
-      ...DEFAULT_RETRIEVAL_CONFIG,
-      ...config.retrieval,
-    });
+    // Initialize decay engine + tier manager (lifecycle scoring)
+    const decayEngine = createDecayEngine(DEFAULT_DECAY_CONFIG);
+    const tierManager = createTierManager(DEFAULT_TIER_CONFIG);
+
+    const retriever = createRetriever(
+      store,
+      embedder,
+      {
+        ...DEFAULT_RETRIEVAL_CONFIG,
+        ...config.retrieval,
+      },
+      { decayEngine, tierManager },
+    );
     const scopeManager = createScopeManager(config.scopes);
     const migrator = createMigrator(store);
 
@@ -370,9 +379,12 @@ const memoryLanceDBProPlugin = {
     let smartExtractor: SmartExtractor | null = null;
     if (config.smartExtraction !== false) {
       try {
+        const embeddingKey = Array.isArray(config.embedding.apiKey)
+          ? config.embedding.apiKey[0]
+          : config.embedding.apiKey;
         const llmApiKey = config.llm?.apiKey
           ? resolveEnvVars(config.llm.apiKey)
-          : resolveEnvVars(config.embedding.apiKey);
+          : resolveEnvVars(embeddingKey);
         const llmBaseURL = config.llm?.baseURL
           ? resolveEnvVars(config.llm.baseURL)
           : config.embedding.baseURL;
@@ -398,10 +410,6 @@ const memoryLanceDBProPlugin = {
         api.logger.warn(`memory-lancedb-pro: smart extraction init failed, falling back to regex: ${String(err)}`);
       }
     }
-
-    // Initialize decay engine (Phase 2: from memx-memory)
-    const decayEngine = createDecayEngine(DEFAULT_DECAY_CONFIG);
-    const tierManager = createTierManager(DEFAULT_TIER_CONFIG);
 
     const pluginVersion = getPluginVersion();
 

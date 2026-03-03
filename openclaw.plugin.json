@@ -2,7 +2,7 @@
   "id": "memory-lancedb-pro",
   "name": "Memory (LanceDB Pro)",
   "description": "Enhanced LanceDB-backed long-term memory with hybrid retrieval, multi-scope isolation, long-context chunking, and management CLI",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "kind": "memory",
   "configSchema": {
     "type": "object",
@@ -249,6 +249,44 @@
             }
           }
         }
+      },
+      "smartExtraction": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable LLM-powered smart memory extraction (6-category system). Falls back to regex capture when disabled or init fails."
+      },
+      "llm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "description": "API key for LLM extraction (defaults to embedding apiKey)"
+          },
+          "model": {
+            "type": "string",
+            "default": "gpt-4o-mini",
+            "description": "LLM model for memory extraction and dedup"
+          },
+          "baseURL": {
+            "type": "string",
+            "description": "Base URL for LLM API (defaults to embedding baseURL)"
+          }
+        }
+      },
+      "extractMinMessages": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 4,
+        "description": "Minimum conversation messages before smart extraction triggers"
+      },
+      "extractMaxChars": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 100000,
+        "default": 8000,
+        "description": "Maximum characters of conversation text to process for extraction"
       }
     },
     "required": [
@@ -305,6 +343,36 @@
       "label": "Database Path",
       "placeholder": "~/.openclaw/memory/lancedb-pro",
       "help": "Directory path for the LanceDB database files",
+      "advanced": true
+    },
+    "smartExtraction": {
+      "label": "Smart Extraction",
+      "help": "Enable LLM-powered 6-category memory extraction. Falls back to regex capture when off."
+    },
+    "llm.apiKey": {
+      "label": "LLM API Key",
+      "sensitive": true,
+      "help": "API key for smart extraction LLM (defaults to embedding apiKey)",
+      "advanced": true
+    },
+    "llm.model": {
+      "label": "LLM Model",
+      "help": "Model for memory extraction and dedup (default: gpt-4o-mini)",
+      "advanced": true
+    },
+    "llm.baseURL": {
+      "label": "LLM Base URL",
+      "help": "Base URL for LLM API (defaults to embedding baseURL)",
+      "advanced": true
+    },
+    "extractMinMessages": {
+      "label": "Min Messages for Extraction",
+      "help": "Minimum conversation messages before smart extraction triggers",
+      "advanced": true
+    },
+    "extractMaxChars": {
+      "label": "Max Chars for Extraction",
+      "help": "Maximum conversation characters to process for extraction",
       "advanced": true
     },
     "autoCapture": {

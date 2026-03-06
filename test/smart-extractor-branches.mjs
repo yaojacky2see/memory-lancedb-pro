@@ -20,7 +20,45 @@ const { MemoryStore } = jiti("../src/store.ts");
 const { createEmbedder } = jiti("../src/embedder.ts");
 const { buildSmartMetadata, stringifySmartMetadata } = jiti("../src/smart-metadata.ts");
 
-function createMockApi(dbPath, llmBaseURL, logs) {
+const EMBEDDING_DIMENSIONS = 2560;
+
+function createDeterministicEmbedding(text, dimensions = EMBEDDING_DIMENSIONS) {
+  void text;
+  const value = 1 / Math.sqrt(dimensions);
+  return new Array(dimensions).fill(value);
+}
+
+function createEmbeddingServer() {
+  return http.createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== "/v1/embeddings") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const inputs = Array.isArray(payload.input) ? payload.input : [payload.input];
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      object: "list",
+      data: inputs.map((input, index) => ({
+        object: "embedding",
+        index,
+        embedding: createDeterministicEmbedding(String(input)),
+      })),
+      model: payload.model || "mock-embedding-model",
+      usage: {
+        prompt_tokens: 0,
+        total_tokens: 0,
+      },
+    }));
+  });
+}
+
+function createMockApi(dbPath, embeddingBaseURL, llmBaseURL, logs) {
   return {
     pluginConfig: {
       dbPath,
@@ -31,8 +69,8 @@ function createMockApi(dbPath, llmBaseURL, logs) {
       embedding: {
         apiKey: "dummy",
         model: "qwen3-embedding-4b",
-        baseURL: "http://127.0.0.1:8201/v1",
-        dimensions: 2560,
+        baseURL: embeddingBaseURL,
+        dimensions: EMBEDDING_DIMENSIONS,
       },
       llm: {
         apiKey: "dummy",
@@ -98,13 +136,13 @@ function createMockApi(dbPath, llmBaseURL, logs) {
 }
 
 async function seedPreference(dbPath) {
-  const store = new MemoryStore({ dbPath, vectorDim: 2560 });
+  const store = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
   const embedder = createEmbedder({
     provider: "openai-compatible",
     apiKey: "dummy",
     model: "qwen3-embedding-4b",
-    baseURL: "http://127.0.0.1:8201/v1",
-    dimensions: 2560,
+    baseURL: process.env.TEST_EMBEDDING_BASE_URL,
+    dimensions: EMBEDDING_DIMENSIONS,
   });
 
   const seedText = "饮品偏好：乌龙茶";
@@ -136,6 +174,7 @@ async function runScenario(mode) {
   const dbPath = path.join(workDir, "db");
   const logs = [];
   let llmCalls = 0;
+  const embeddingServer = createEmbeddingServer();
 
   const server = http.createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/chat/completions") {
@@ -200,11 +239,19 @@ async function runScenario(mode) {
     }));
   });
 
+  await new Promise((resolve) => embeddingServer.listen(0, "127.0.0.1", resolve));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const embeddingPort = embeddingServer.address().port;
   const port = server.address().port;
+  process.env.TEST_EMBEDDING_BASE_URL = `http://127.0.0.1:${embeddingPort}/v1`;
 
   try {
-    const api = createMockApi(dbPath, `http://127.0.0.1:${port}`, logs);
+    const api = createMockApi(
+      dbPath,
+      `http://127.0.0.1:${embeddingPort}/v1`,
+      `http://127.0.0.1:${port}`,
+      logs,
+    );
     plugin.register(api);
     await seedPreference(dbPath);
 
@@ -227,11 +274,13 @@ async function runScenario(mode) {
       { agentId: "life", sessionKey: "agent:life:test" },
     );
 
-    const freshStore = new MemoryStore({ dbPath, vectorDim: 2560 });
+    const freshStore = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
     const entries = await freshStore.list(["agent:life"], undefined, 10, 0);
 
     return { entries, llmCalls, logs };
   } finally {
+    delete process.env.TEST_EMBEDDING_BASE_URL;
+    await new Promise((resolve) => embeddingServer.close(resolve));
     await new Promise((resolve) => server.close(resolve));
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -261,6 +310,7 @@ async function runMultiRoundScenario() {
   let extractionCall = 0;
   let dedupCall = 0;
   let mergeCall = 0;
+  const embeddingServer = createEmbeddingServer();
 
   const server = http.createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/chat/completions") {
@@ -370,11 +420,19 @@ async function runMultiRoundScenario() {
     }));
   });
 
+  await new Promise((resolve) => embeddingServer.listen(0, "127.0.0.1", resolve));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const embeddingPort = embeddingServer.address().port;
   const port = server.address().port;
+  process.env.TEST_EMBEDDING_BASE_URL = `http://127.0.0.1:${embeddingPort}/v1`;
 
   try {
-    const api = createMockApi(dbPath, `http://127.0.0.1:${port}`, logs);
+    const api = createMockApi(
+      dbPath,
+      `http://127.0.0.1:${embeddingPort}/v1`,
+      `http://127.0.0.1:${port}`,
+      logs,
+    );
     plugin.register(api);
 
     const rounds = [
@@ -395,10 +453,12 @@ async function runMultiRoundScenario() {
       );
     }
 
-    const freshStore = new MemoryStore({ dbPath, vectorDim: 2560 });
+    const freshStore = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
     const entries = await freshStore.list(["agent:life"], undefined, 10, 0);
     return { entries, extractionCall, dedupCall, mergeCall, logs };
   } finally {
+    delete process.env.TEST_EMBEDDING_BASE_URL;
+    await new Promise((resolve) => embeddingServer.close(resolve));
     await new Promise((resolve) => server.close(resolve));
     rmSync(workDir, { recursive: true, force: true });
   }

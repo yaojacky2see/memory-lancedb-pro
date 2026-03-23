@@ -86,6 +86,7 @@ interface PluginConfig {
   autoRecall?: boolean;
   autoRecallMinLength?: number;
   autoRecallMinRepeated?: number;
+  autoRecallTimeoutMs?: number;
   autoRecallMaxItems?: number;
   autoRecallMaxChars?: number;
   autoRecallPerItemMaxChars?: number;
@@ -2162,7 +2163,7 @@ const memoryLanceDBProPlugin = {
         if (text) lastRawUserMessage.set(cacheKey, text);
       });
 
-      const AUTO_RECALL_TIMEOUT_MS = 3_000; // bounded timeout to prevent agent startup stall
+      const AUTO_RECALL_TIMEOUT_MS = parsePositiveInt(config.autoRecallTimeoutMs) ?? 5_000; // configurable; default raised from 3s to 5s for remote embedding APIs behind proxies
       api.on("before_prompt_build", async (event: any, ctx: any) => {
         // Manually increment turn counter for this session
         const sessionId = ctx?.sessionId || "default";
